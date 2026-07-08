@@ -1,0 +1,21 @@
+# PyInstaller & Build files
+build/
+dist/
+*.spec
+
+# Temp files & Local configuration
+temp_streamlit_run/
+.streamlit/
+__pycache__/
+*.pyc
+
+# Local Data / Output PPTX (설문 로우데이터 및 생성된 보고서 제외)
+*.xlsx
+*.csv
+*.pptx
+
+# 단, assets 폴더 내부의 기본 템플릿과 설정 예시는 포함시킵니다.
+!assets/설정_예시.xlsx
+!assets/템플릿_결보표양.pptx
+!템플릿_결보표양.pptx
+!설정.xlsx
