@@ -2,15 +2,25 @@
 import os
 import sys
 import tempfile
+import base64
 import streamlit as st
 
 # Add current directory to path so python can find report_generator.py
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from report_generator import generate_report
+from slide_exporter import export_slides_if_needed
+
+# Base64 image encoding helper for CSS backgrounds
+def get_base64_image(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    return None
 
 # Configure Streamlit page layout and aesthetics
 st.set_page_config(
-    page_title="KOOS RESULT 결과보고서 자동 생성기",
+    page_title="교육만족도 결과보고서생성기",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -95,24 +105,281 @@ st.markdown(
         border: 1px solid #DFE4EC;
         transition: all 0.2s ease;
     }
+
     .download-link-btn:hover {
         background-color: #EAF1FF;
         border-color: #2D6CDF;
+    }
+
+    /* 가상 PPT 슬라이드 프리뷰 스타일 */
+    .ppt-preview-container {
+        width: 100%;
+        background-color: #f1f3f7;
+        padding: 12px;
+        border-radius: 12px;
+        box-shadow: inset 0 2px 5px rgba(0,0,0,0.05);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-top: 10px;
+        margin-bottom: 20px;
+    }
+    .ppt-editor-frame {
+        width: 100%;
+        border: 2px solid #D2D6DC;
+        border-radius: 10px;
+        background-color: #E5E9F0;
+        padding: 6px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+    }
+    .ppt-editor-header-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background-color: #ffffff;
+        padding: 6px 12px;
+        border-radius: 6px 6px 0 0;
+        border-bottom: 1.5px solid #E5E9F0;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #4A5568;
+    }
+    .ppt-editor-dots {
+        display: flex;
+        gap: 5px;
+    }
+    .ppt-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: #CBD5E0;
+    }
+    .ppt-dot.red { background-color: #FC8181; }
+    .ppt-dot.yellow { background-color: #F6E05E; }
+    .ppt-dot.green { background-color: #68D391; }
+    
+    .ppt-preview-slide {
+        width: 100%;
+        background-color: #ffffff;
+        border: 1px solid #DFE4EC;
+        border-radius: 0 0 6px 6px;
+        padding: 28px 20px 20px 20px;
+        position: relative;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 260px;
+    }
+    .ppt-slide-badge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: linear-gradient(135deg, #FF6B6B, #FF8E53);
+        color: white;
+        font-size: 0.65rem;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 20px;
+        box-shadow: 0 2px 5px rgba(255, 107, 107, 0.25);
+        z-index: 10;
+        line-height: 1.2;
+    }
+    .ppt-preview-blue-box {
+        border: 1.5px dashed #2D6CDF;
+        background-color: rgba(45, 108, 223, 0.03);
+        border-radius: 6px;
+        padding: 8px 12px;
+        position: relative;
+        margin-bottom: 12px;
+        transition: all 0.2s ease;
+    }
+    .ppt-preview-blue-box:hover {
+        background-color: rgba(45, 108, 223, 0.08);
+        border-style: solid;
+        box-shadow: 0 0 8px rgba(45, 108, 223, 0.15);
+    }
+    .box-tag {
+        position: absolute;
+        top: -8px;
+        left: 8px;
+        background-color: #2D6CDF;
+        color: white;
+        font-size: 0.6rem;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: 3px;
+        line-height: 1.2;
+    }
+    .box-content {
+        font-size: 0.85rem;
+        color: #333333;
+        font-weight: 500;
+        min-height: 14px;
+        word-break: break-all;
+    }
+    .box-content-title1 {
+        font-size: 0.95rem;
+        font-weight: 400;
+        color: #555555;
+        margin-bottom: 2px;
+        min-height: 16px;
+        word-break: break-all;
+    }
+    .box-content-title2 {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #111111;
+        min-height: 24px;
+        word-break: break-all;
+    }
+    .ppt-preview-footer {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 10px;
+        margin-top: auto;
+    }
+    .overview-slide {
+        justify-content: flex-start;
+    }
+    .slide-header {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #2D6CDF;
+        margin-bottom: 12px;
+        border-bottom: 2px solid #2D6CDF;
+        padding-bottom: 4px;
+    }
+    .ppt-preview-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+    }
+    .ppt-preview-table tr {
+        border-bottom: 1px solid #f1f3f7;
+    }
+    .table-label {
+        width: 25%;
+        font-weight: 700;
+        color: #4a5568;
+        padding: 6px 0;
+        vertical-align: middle;
+    }
+    .table-value {
+        width: 75%;
+        padding: 4px 0;
+    }
+    .inline-box {
+        margin-bottom: 0;
+        padding: 6px 10px;
+    }
+
+    /* 실제 슬라이드 오버레이용 CSS */
+    .ppt-slide-overlay-container {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background-color: #ffffff;
+        background-size: 100% 100%;
+        background-repeat: no-repeat;
+        border: 1px solid #DFE4EC;
+        border-radius: 0 0 6px 6px;
+        box-sizing: border-box;
+        overflow: hidden;
+        min-height: 250px;
+    }
+    
+    /* 절대 좌표 블루 박스 */
+    .ppt-abs-box {
+        position: absolute;
+        border: 1.8px dashed #E53E3E;
+        background-color: rgba(229, 62, 62, 0.06);
+        border-radius: 4px;
+        padding: 4px 6px;
+        box-sizing: border-box;
+        transition: all 0.2s ease;
+        z-index: 5;
+        overflow: hidden;
+    }
+    .ppt-abs-box:hover {
+        background-color: rgba(229, 62, 62, 0.12);
+        border-style: solid;
+        box-shadow: 0 0 8px rgba(229, 62, 62, 0.3);
+    }
+    
+    /* 표지 절대 좌표 배치 */
+    .pin-cover-label {
+        top: 6%;
+        left: 7%;
+        width: 25%;
+        height: 12%;
+    }
+    .pin-cover-title {
+        top: 26%;
+        left: 7%;
+        width: 86%;
+        height: 32%;
+    }
+    .pin-cover-instructor {
+        top: 73%;
+        left: 7%;
+        width: 44%;
+        height: 14%;
+    }
+    .pin-cover-students {
+        top: 73%;
+        left: 54%;
+        width: 39%;
+        height: 14%;
+    }
+    
+    /* 교육개요 절대 좌표 배치 */
+    .pin-overview-name {
+        top: 23%;
+        left: 27%;
+        width: 66%;
+        height: 9%;
+    }
+    .pin-overview-schedule {
+        top: 34%;
+        left: 27%;
+        width: 66%;
+        height: 9%;
+    }
+    .pin-overview-method {
+        top: 45%;
+        left: 27%;
+        width: 66%;
+        height: 9%;
+    }
+    .pin-overview-target {
+        top: 56%;
+        left: 27%;
+        width: 66%;
+        height: 9%;
+    }
+    .pin-overview-goal {
+        top: 67%;
+        left: 27%;
+        width: 66%;
+        height: 22%;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# Helper function to read file as bytes
+
 def get_file_bytes(filepath):
     if os.path.exists(filepath):
         with open(filepath, "rb") as f:
             return f.read()
     return None
 
+
 # Locate default files
 current_dir = os.path.dirname(os.path.abspath(__file__))
+
 default_template_path = os.path.join(current_dir, "템플릿_결보표양.pptx")
 if not os.path.exists(default_template_path):
     default_template_path = os.path.join(current_dir, "assets", "템플릿_결보표양.pptx")
@@ -121,15 +388,26 @@ default_config_path = os.path.join(current_dir, "설정.xlsx")
 if not os.path.exists(default_config_path):
     default_config_path = os.path.join(current_dir, "assets", "설정_예시.xlsx")
 
+# PPT 슬라이드 이미지 사전 추출 구동 (캐싱 내장)
+export_slides_if_needed(default_template_path, os.path.join(current_dir, "assets"))
+
+# Base64 이미지 변수화
+slide1_base64 = get_base64_image(os.path.join(current_dir, "assets", "slide1_origin.png"))
+slide4_base64 = get_base64_image(os.path.join(current_dir, "assets", "slide4_origin.png"))
+
+
+
 # ---------------- Sidebar ----------------
 with st.sidebar:
     st.markdown("<div class='sidebar-header'>📊 KOOS RESULT</div>", unsafe_allow_html=True)
-    st.markdown("<p style='font-size: 0.9rem; color:#666;'>교육 만족도 결과보고서 PPT를 자동생성해주는 웹 서비스입니다.</p>", unsafe_allow_html=True)
-    
+    st.markdown(
+        "<p style='font-size: 0.9rem; color:#666;'>교육 만족도 결과보고서 PPT를 자동생성해주는 웹 서비스입니다.</p>",
+        unsafe_allow_html=True
+    )
+
     st.markdown("---")
     st.markdown("<div style='font-weight:600; margin-bottom:10px;'>리소스 다운로드</div>", unsafe_allow_html=True)
-    
-    # Download buttons for template and sample settings
+
     template_bytes = get_file_bytes(default_template_path)
     if template_bytes:
         st.download_button(
@@ -139,7 +417,7 @@ with st.sidebar:
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             use_container_width=True
         )
-    
+
     config_bytes = get_file_bytes(default_config_path)
     if config_bytes:
         st.download_button(
@@ -149,9 +427,10 @@ with st.sidebar:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-        
+
     st.markdown("---")
     st.markdown("<div style='font-weight:600; margin-bottom:10px;'>이용 안내</div>", unsafe_allow_html=True)
+
     with st.expander("💡 척도 자동 감지 규칙"):
         st.markdown(
             """
@@ -161,6 +440,7 @@ with st.sidebar:
             - 응답의 60% 이상이 특정 척도 라벨을 가질 때 작동합니다.
             """
         )
+
     with st.expander("💡 주관식 자동 분류"):
         st.markdown(
             """
@@ -170,60 +450,264 @@ with st.sidebar:
             """
         )
 
-# ---------------- Main Page ----------------
-st.markdown("<div class='main-title'>교육 만족도 결과보고서 자동 생성기</div>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>설문 로우데이터와 설정 값만 입력하면 시각화 결과 보고서 PPT가 즉시 만들어집니다.</div>", unsafe_allow_html=True)
 
-# Grid Layout
+# ---------------- Main Page ----------------
+st.markdown("<div class='main-title'>교육만족도 결과보고서생성기</div>", unsafe_allow_html=True)
+st.markdown(
+    "<div class='subtitle'>설문 로우데이터와 설정 값만 입력하면 시각화 결과 보고서 PPT가 즉시 만들어집니다.</div>",
+    unsafe_allow_html=True
+)
+
 col_left, col_right = st.columns([1.1, 0.9])
 
 with col_left:
     st.markdown("### 1. 입력 파일 업로드")
-    
-    # 1. Raw survey data upload
+
     raw_file = st.file_uploader(
         "📊 설문 로우데이터 엑셀 또는 CSV 파일 업로드 (필수)",
         type=["xlsx", "xls", "xlsm", "csv"],
         help="구글폼 등에서 내려받은 응답 원본 파일입니다."
     )
-    
+
+    if raw_file:
+        st.markdown('<div class="card" style="padding: 15px; background-color: #EAF1FF; border: 1px solid #2D6CDF; margin-top: 10px; margin-bottom: 15px;">', unsafe_allow_html=True)
+        col_lbl, col_btn = st.columns([1.2, 0.8])
+        with col_lbl:
+            st.markdown("<p style='margin:0; font-weight:600; color:#2D6CDF; font-size:0.9rem;'>💬 업로드된 파일의 주관식 답변에서 '없음' 의견 비중을 사전 분석해보세요.</p>", unsafe_allow_html=True)
+        with col_btn:
+            analyze_subj = st.button("🔍 주관식 '없음' 통계 분석", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if analyze_subj:
+            with st.spinner("주관식 의견 분석 중..."):
+                try:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        raw_ext = os.path.splitext(raw_file.name)[1]
+                        raw_temp_path = os.path.join(tmpdir, f"raw_data{raw_ext}")
+                        with open(raw_temp_path, "wb") as f:
+                            f.write(raw_file.getbuffer())
+
+                        from report_generator import parse_raw_data, _is_no_opinion
+                        data = parse_raw_data(raw_temp_path)
+                        subjective = data.get("subjective", [])
+                        n_resp = data.get("n_responses", 0)
+
+                        if not subjective:
+                            st.warning("⚠️ 파일 내에서 분석할 수 있는 주관식 문항을 찾지 못했습니다.")
+                        else:
+                            st.markdown(f"##### 📊 주관식 '없음/무의견' 통계 분석 결과 (총 응답자: {n_resp}명)")
+                            
+                            cols = st.columns(len(subjective))
+                            for idx, sq in enumerate(subjective):
+                                total_ans = len(sq["answers"])
+                                no_op_count = sum(1 for ans in sq["answers"] if _is_no_opinion(ans))
+                                no_op_rate = round(no_op_count / total_ans * 100) if total_ans else 0
+                                
+                                with cols[idx % len(cols)]:
+                                    st.markdown(f"""
+                                    <div style="background-color: #ffffff; border-radius: 8px; border: 1px solid #eef1f6; box-shadow: 0 4px 6px rgba(0,0,0,0.02); padding: 12px; margin-bottom: 15px; border-top: 4px solid #2D6CDF;">
+                                        <div style="font-weight: 700; font-size: 0.85rem; color: #1A202C; margin-bottom: 8px; min-height: 36px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{sq['header']}</div>
+                                        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: #4A5568;">
+                                            <div>💬 전체 응답: <strong>{total_ans}건</strong></div>
+                                            <div style="color: #E53E3E;">🚫 '없음'류: <strong>{no_op_count}건 ({no_op_rate}%)</strong></div>
+                                            <div style="color: #2D6CDF;">✅ 유효 의견: <strong>{total_ans - no_op_count}건 ({100 - no_op_rate}%)</strong></div>
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"❌ 분석 중 오류 발생: {str(e)}")
+
     st.markdown("---")
     st.markdown("### 2. 보고서 세부 정보 설정")
-    
-    # Selection of configuration method
+
     config_mode = st.radio(
         "설정 값 입력 방식 선택",
         options=["직접 입력 (추천 - 엑셀 파일 없이 직접 타이핑)", "엑셀 파일 업로드 (설정.xlsx 사용)"],
         horizontal=True
     )
-    
+
     config_dict = None
     config_file = None
-    
+
     if "직접 입력" in config_mode:
-        st.info("💡 아래 입력 칸에 정보를 적어주세요. '설정.xlsx'를 따로 업로드하지 않아도 됩니다.")
-        
-        tab_basic, tab_overview = st.tabs(["📝 표지 기본정보", "🏫 교육 개요"])
-        
+        st.info("💡 아래 입력 칸에 정보를 적어주세요. 우측 가상 슬라이드(실제 PPT 매핑 가이드)에 위치가 실시간 시각화됩니다.")
+
+        tab_basic, tab_overview = st.tabs(["📝 표지 슬라이드 매핑 가이드", "🏫 교육개요 슬라이드 매핑 가이드"])
+
         with tab_basic:
-            col_b1, col_b2 = st.columns(2)
-            with col_b1:
-                cover_label = st.text_input("표지 상단 라벨", value="결과보고서")
-                title1 = st.text_input("표지 대제목 1줄", value="SK TNS FLP 대상")
-                title2 = st.text_input("표지 대제목 2줄", value="인사이트 트립 결과보고서")
-            with col_b2:
-                instructor = st.text_input("강사명", value="설상훈 교수")
-                student_count = st.number_input("수강인원(명)", min_value=1, value=9, step=1,
-                                                help="응답률 계산에 활용됩니다. (응답자 수 ÷ 수강인원 × 100)")
-                
-        with tab_overview:
-            course_name = st.text_input("과정명", value="인사이트 트립")
-            schedule = st.text_input("교육일정", value="2026.07.08")
-            method = st.text_input("교육방식", value="대면 교육")
-            target = st.text_input("교육대상", value="핵심 실무진")
-            goal = st.text_area("교육목표", value="트렌드 학습 및 비즈니스 인사이트 도출")
+            col_in, col_pre = st.columns([1.1, 0.9])
             
-        # Build configuration dict
+            with col_in:
+                cover_label = st.text_input(
+                    "표지 상단 라벨", 
+                    value="결과보고서",
+                    help="📄 실제 PPT 파일 [1페이지(표지)] 맨 위에 위치한 회색 박스 영역에 매핑됩니다."
+                )
+                title1 = st.text_input(
+                    "표지 대제목 1줄", 
+                    value="SK TNS FLP 대상",
+                    help="📄 실제 PPT 파일 [1페이지(표지)] 중앙 대제목의 첫 번째 줄에 매핑됩니다."
+                )
+                title2 = st.text_input(
+                    "표지 대제목 2줄", 
+                    value="인사이트 트립 결과보고서",
+                    help="📄 실제 PPT 파일 [1페이지(표지)] 중앙 대제목의 두 번째 줄에 매핑됩니다."
+                )
+
+                if "instructor_count" not in st.session_state:
+                    st.session_state.instructor_count = 1
+
+                col_inst_title, col_inst_plus, col_inst_minus = st.columns([5, 1, 1])
+
+                with col_inst_title:
+                    st.markdown("**강사명** (표지 우하단 반영)")
+
+                with col_inst_plus:
+                    add_disabled = st.session_state.instructor_count >= 5
+                    if st.button("➕", help="강사 추가", disabled=add_disabled, key="add_inst"):
+                        st.session_state.instructor_count += 1
+                        st.rerun()
+
+                with col_inst_minus:
+                    minus_disabled = st.session_state.instructor_count <= 1
+                    if st.button("➖", help="강사 삭제", disabled=minus_disabled, key="del_inst"):
+                        st.session_state.instructor_count -= 1
+                        st.rerun()
+
+                instructors = []
+                for i in range(st.session_state.instructor_count):
+                    default_value = "설상훈 교수" if i == 0 else ""
+                    instructor_name = st.text_input(
+                        f"강사 {i + 1}",
+                        value=default_value,
+                        key=f"instructor_{i}",
+                        help="📄 실제 PPT 파일 [1페이지(표지)] 우하단 강사명 영역에 매핑됩니다."
+                    )
+                    instructors.append(instructor_name)
+
+                instructor = ", ".join([name.strip() for name in instructors if name and name.strip()])
+
+                student_count = st.number_input(
+                    "수강인원(명)",
+                    min_value=1,
+                    value=9,
+                    step=1,
+                    help="📄 실제 PPT 파일 [1페이지(표지)] 우하단 인원 수에 매핑되며, [7페이지]의 응답률(수강인원 대비 응답자 수) 계산에도 자동 대입됩니다."
+                )
+
+            with col_pre:
+                st.markdown("**🎨 PPT 표지 슬라이드(1페이지) 실제 매핑 맵**")
+                bg_style = f"background-image: url(data:image/png;base64,{slide1_base64});" if slide1_base64 else "background-color: #ffffff;"
+                preview_html = f"""
+                <div class="ppt-preview-container">
+                    <div class="ppt-editor-frame">
+                        <div class="ppt-editor-header-bar">
+                            <div class="ppt-editor-dots">
+                                <span class="ppt-dot red"></span>
+                                <span class="ppt-dot yellow"></span>
+                                <span class="ppt-dot green"></span>
+                            </div>
+                            <div style="font-size: 0.7rem; color: #718096; font-family: monospace;">템플릿_결보표양.pptx - 슬라이드 1 (표지)</div>
+                            <div></div>
+                        </div>
+                        <div class="ppt-slide-overlay-container" style="{bg_style}">
+                            <span class="ppt-slide-badge">슬라이드 1 / 9</span>
+                            <div class="ppt-abs-box pin-cover-label">
+                                <span class="box-tag" style="background-color: #E53E3E;">표지 상단 라벨 (1p 맨위)</span>
+                                <div class="box-content">{cover_label if cover_label else '&nbsp;'}</div>
+                            </div>
+                            <div class="ppt-abs-box pin-cover-title">
+                                <span class="box-tag" style="background-color: #E53E3E;">표지 대제목 1~2줄 (1p 중앙)</span>
+                                <div class="box-content-title1">{title1 if title1 else '&nbsp;'}</div>
+                                <div class="box-content-title2">{title2 if title2 else '&nbsp;'}</div>
+                            </div>
+                            <div class="ppt-abs-box pin-cover-instructor">
+                                <span class="box-tag" style="background-color: #E53E3E;">강사명 (1p 우하단)</span>
+                                <div class="box-content">{instructor if instructor else '&nbsp;'}</div>
+                            </div>
+                            <div class="ppt-abs-box pin-cover-students">
+                                <span class="box-tag" style="background-color: #E53E3E;">수강인원 (1p 우하단)</span>
+                                <div class="box-content">{student_count}명</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """
+                st.markdown(preview_html, unsafe_allow_html=True)
+
+        with tab_overview:
+            col_in, col_pre = st.columns([1.1, 0.9])
+            
+            with col_in:
+                course_name = st.text_input(
+                    "과정명", 
+                    value="인사이트 트립",
+                    help="📄 실제 PPT 파일 [4페이지(교육개요 표)]의 '과정명' 행의 두 번째 열에 대입됩니다."
+                )
+                schedule = st.text_input(
+                    "교육일정", 
+                    value="2026.07.08",
+                    help="📄 실제 PPT 파일 [4페이지(교육개요 표)]의 '교육일정' 행의 두 번째 열에 대입됩니다."
+                )
+                method = st.text_input(
+                    "교육방식", 
+                    value="대면 교육",
+                    help="📄 실제 PPT 파일 [4페이지(교육개요 표)]의 '교육방식' 행의 두 번째 열에 대입됩니다."
+                )
+                target = st.text_input(
+                    "교육대상", 
+                    value="핵심 실무진",
+                    help="📄 실제 PPT 파일 [4페이지(교육개요 표)]의 '교육 대상' 행의 두 번째 열에 대입됩니다."
+                )
+                goal = st.text_area(
+                    "교육목표", 
+                    value="트렌드 학습 및 비즈니스 인사이트 도출",
+                    help="📄 실제 PPT 파일 [4페이지(교육개요 표)]의 '교육 목표' 행의 두 번째 열에 대입됩니다."
+                )
+
+            with col_pre:
+                st.markdown("**🎨 PPT 교육개요 슬라이드(4페이지) 실제 매핑 맵**")
+                bg_style = f"background-image: url(data:image/png;base64,{slide4_base64});" if slide4_base64 else "background-color: #ffffff;"
+                preview_html = f"""
+                <div class="ppt-preview-container">
+                    <div class="ppt-editor-frame">
+                        <div class="ppt-editor-header-bar">
+                            <div class="ppt-editor-dots">
+                                <span class="ppt-dot red"></span>
+                                <span class="ppt-dot yellow"></span>
+                                <span class="ppt-dot green"></span>
+                            </div>
+                            <div style="font-size: 0.7rem; color: #718096; font-family: monospace;">템플릿_결보표양.pptx - 슬라이드 4 (교육개요)</div>
+                            <div></div>
+                        </div>
+                        <div class="ppt-slide-overlay-container" style="{bg_style}">
+                            <span class="ppt-slide-badge">슬라이드 4 / 9</span>
+                            <div class="ppt-abs-box pin-overview-name">
+                                <span class="box-tag" style="background-color: #E53E3E;">과정명 (4p 표 1행)</span>
+                                <div class="box-content">{course_name if course_name else '&nbsp;'}</div>
+                            </div>
+                            <div class="ppt-abs-box pin-overview-schedule">
+                                <span class="box-tag" style="background-color: #E53E3E;">교육일정 (4p 표 2행)</span>
+                                <div class="box-content">{schedule if schedule else '&nbsp;'}</div>
+                            </div>
+                            <div class="ppt-abs-box pin-overview-method">
+                                <span class="box-tag" style="background-color: #E53E3E;">교육방식 (4p 표 3행)</span>
+                                <div class="box-content">{method if method else '&nbsp;'}</div>
+                            </div>
+                            <div class="ppt-abs-box pin-overview-target">
+                                <span class="box-tag" style="background-color: #E53E3E;">교육대상 (4p 표 4행)</span>
+                                <div class="box-content">{target if target else '&nbsp;'}</div>
+                            </div>
+                            <div class="ppt-abs-box pin-overview-goal">
+                                <span class="box-tag" style="background-color: #E53E3E;">교육목표 (4p 표 5행)</span>
+                                <div class="box-content" style="white-space: pre-wrap;">{goal if goal else '&nbsp;'}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """
+                st.markdown(preview_html, unsafe_allow_html=True)
+
         config_dict = {
             "basic": {
                 "표지_상단라벨": cover_label,
@@ -241,7 +725,7 @@ with col_left:
             },
             "questions": []
         }
-        
+
     else:
         st.info("📂 '설정.xlsx' 파일을 업로드해 주세요. (다운로드 탭에서 예시를 내려받아 수정할 수 있습니다.)")
         config_file = st.file_uploader(
@@ -250,23 +734,22 @@ with col_left:
             help="표지 제목, 교육 개요 등이 기록된 설정 엑셀 파일입니다."
         )
 
+
 with col_right:
     st.markdown("### 3. 추가 옵션")
-    
-    # Option: Keep no opinion
+
     keep_no_opinion = st.checkbox(
         "아쉬웠던 점의 '없음'류 의견도 그대로 표시",
         value=False,
         help="체크 해제 시 '없음', '없습니다', '해당사항 없음' 같은 짧고 무의미한 의견을 필터링합니다."
     )
-    
-    # Custom template PPTX
+
     use_custom_template = st.checkbox(
         "사용자 정의 PPT 템플릿 파일 업로드",
         value=False,
         help="체크 시 나만의 PPT 템플릿(.pptx)을 업로드하여 반영할 수 있습니다."
     )
-    
+
     template_file = None
     if use_custom_template:
         template_file = st.file_uploader(
@@ -275,20 +758,19 @@ with col_right:
             help="결과보고서 마스터 레이아웃이 적용된 파워포인트 템플릿입니다."
         )
     else:
-        st.caption(f"💡 기본 템플릿 (`{os.path.basename(default_template_path or '템플릿_결보표양.pptx')}`)을 사용합니다.")
-        
+        st.caption(
+            f"💡 기본 템플릿 (`{os.path.basename(default_template_path or '템플릿_결보표양.pptx')}`)을 사용합니다."
+        )
+
     st.markdown("---")
     st.markdown("### 4. 보고서 생성")
-    
-    # Button to generate report
+
     generate_btn = st.button("결과보고서 만들기 🚀", use_container_width=True)
-    
-    # Container for generation logs and status
+
     log_area = st.empty()
     download_area = st.empty()
 
     if generate_btn:
-        # Validations
         if not raw_file:
             st.error("❌ 설문 로우데이터 파일을 업로드해 주세요.")
         elif "엑셀 파일 업로드" in config_mode and not config_file:
@@ -296,50 +778,50 @@ with col_right:
         elif use_custom_template and not template_file:
             st.error("❌ 템플릿 PPTX 파일을 업로드해 주세요.")
         else:
-            # Create a temporary directory to save and parse files
             with tempfile.TemporaryDirectory() as tmpdir:
-                # Save Raw File
                 raw_ext = os.path.splitext(raw_file.name)[1]
                 raw_temp_path = os.path.join(tmpdir, f"raw_data{raw_ext}")
+
                 with open(raw_temp_path, "wb") as f:
                     f.write(raw_file.getbuffer())
-                
-                # Save Config File or Dict
+
                 config_arg = None
+                config_temp_path = None
+
                 if config_file:
                     config_ext = os.path.splitext(config_file.name)[1]
                     config_temp_path = os.path.join(tmpdir, f"config{config_ext}")
+
                     with open(config_temp_path, "wb") as f:
                         f.write(config_file.getbuffer())
+
                     config_arg = config_temp_path
                 else:
                     config_arg = config_dict
-                    
-                # Save Template File
+
                 template_temp_path = default_template_path
+
                 if template_file:
                     template_temp_path = os.path.join(tmpdir, "template.pptx")
+
                     with open(template_temp_path, "wb") as f:
                         f.write(template_file.getbuffer())
-                
+
                 if not template_temp_path or not os.path.exists(template_temp_path):
                     st.error("❌ 기본 템플릿 파일을 찾을 수 없습니다. 템플릿 파일을 직접 업로드해 주세요.")
                 else:
-                    # Output path
                     output_temp_path = os.path.join(tmpdir, "output.pptx")
-                    
-                    # Set up logging callback for Streamlit UI
+
                     logs = []
-                    
+
                     def streamlit_log(message):
                         logs.append(message)
-                        # Display latest 8 log lines in real-time
                         log_area.code("\n".join(logs[-10:]))
-                    
-                    # Run the generator
+
                     try:
                         with st.spinner("결과보고서 생성 중..."):
                             streamlit_log("[시작] 교육보고서 생성을 시작합니다...")
+
                             generate_report(
                                 raw_path=raw_temp_path,
                                 config=config_arg,
@@ -348,39 +830,48 @@ with col_right:
                                 drop_no_opinion=not keep_no_opinion,
                                 log=streamlit_log
                             )
-                            
-                        # If successful, read generated file to serve for download
+
                         if os.path.exists(output_temp_path):
                             with open(output_temp_path, "rb") as f:
                                 result_pptx_bytes = f.read()
-                            
-                            # Determine download filename
+
                             dl_filename = "교육결과보고서.pptx"
+
                             if config_dict:
-                                title = config_dict["basic"].get("표지_제목2") or config_dict["basic"].get("표지_제목1")
+                                title = (
+                                    config_dict["basic"].get("표지_제목2")
+                                    or config_dict["basic"].get("표지_제목1")
+                                )
+
                                 if title:
                                     dl_filename = f"{title.replace(' ', '_')}_결과보고서.pptx"
-                            elif config_file:
+
+                            elif config_file and config_temp_path:
                                 try:
                                     import openpyxl
+
                                     wb = openpyxl.load_workbook(config_temp_path, data_only=True)
+
                                     if "기본정보" in wb.sheetnames:
                                         ws = wb["기본정보"]
                                         title = ""
+
                                         for r in range(1, ws.max_row + 1):
                                             k = ws.cell(row=r, column=1).value
                                             v = ws.cell(row=r, column=2).value
+
                                             if k and str(k).strip() in ("표지_제목2", "표지_제목1") and v:
                                                 title = str(v).strip()
                                                 break
+
                                         if title:
                                             dl_filename = f"{title.replace(' ', '_')}_결과보고서.pptx"
+
                                 except Exception:
                                     pass
-                            
+
                             st.success("🎉 결과보고서 생성이 완료되었습니다!")
-                            
-                            # Render Download Button
+
                             download_area.download_button(
                                 label="📥 결과보고서 다운로드 (.pptx)",
                                 data=result_pptx_bytes,
@@ -390,6 +881,7 @@ with col_right:
                             )
                         else:
                             st.error("❌ 결과 파일 생성에 실패했습니다. 로그를 확인하세요.")
+
                     except Exception as e:
                         st.error(f"❌ 생성 도중 오류가 발생했습니다: {str(e)}")
                         st.exception(e)
