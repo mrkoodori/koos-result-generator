@@ -9,6 +9,7 @@ import streamlit as st
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from report_generator import generate_report
 from slide_exporter import export_slides_if_needed
+from photo_slide_maker import generate_photo_slides
 
 # Base64 image encoding helper for CSS backgrounds
 def get_base64_image(file_path):
@@ -406,6 +407,14 @@ with st.sidebar:
     )
 
     st.markdown("---")
+    menu = st.selectbox(
+        "🛠️ 기능 선택",
+        ["📊 결과보고서 자동 생성", "📸 사진 슬라이드 생성 (PhotoSlideMaker)"],
+        index=0,
+        help="만족도 조사 결과를 기반으로 결과보고서 PPT를 자동 빌드하거나, 교육 활동 사진을 업로드해 사진 스케치 슬라이드를 만듭니다."
+    )
+
+    st.markdown("---")
     st.markdown("<div style='font-weight:600; margin-bottom:10px;'>리소스 다운로드</div>", unsafe_allow_html=True)
 
     template_bytes = get_file_bytes(default_template_path)
@@ -452,6 +461,117 @@ with st.sidebar:
 
 
 # ---------------- Main Page ----------------
+if menu == "📸 사진 슬라이드 생성 (PhotoSlideMaker)":
+    st.markdown("<div class='main-title'>📸 교육 사진 슬라이드 자동 생성기 (PhotoSlideMaker)</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='subtitle'>교육 현장 사진들을 업로드하면, 장수에 알맞은 최적의 격자 그리드로 배치된 스케치 슬라이드 PPTX가 즉시 빌드됩니다.</div>",
+        unsafe_allow_html=True
+    )
+
+    col_ph_left, col_ph_right = st.columns([1.1, 0.9])
+
+    with col_ph_left:
+        st.markdown("### 1. 사진 리소스 업로드")
+        photo_files = st.file_uploader(
+            "📁 사진 파일들(다중 선택 가능) 또는 ZIP 압축 파일 업로드 (필수)",
+            type=["zip", "jpg", "jpeg", "png", "webp", "bmp"],
+            accept_multiple_files=True,
+            help="여러 장의 이미지 파일을 다중 선택하여 올리거나, 사진 폴더를 ZIP으로 압축해 올릴 수 있습니다.",
+            key="photo_files_uploader"
+        )
+
+        st.markdown("### 2. 슬라이드 설정")
+        max_photos = st.slider(
+            "🎛️ 슬라이드당 최대 사진 수",
+            min_value=1,
+            max_value=6,
+            value=6,
+            help="한 페이지에 최대 몇 장의 사진을 격자 배치할지 선택합니다. 6장을 초과하면 다음 슬라이드에 자동 분할 배치됩니다."
+        )
+
+        use_photo_template = st.checkbox(
+            "🎨 기존 PPT 템플릿(PhotoSlides.pptx) 뒤에 이어 붙이기",
+            value=False,
+            help="체크할 경우 업로드하신 PPT 파일 맨 뒤에 사진 슬라이드를 덧붙여서 새로 생성합니다."
+        )
+
+        photo_template_file = None
+        if use_photo_template:
+            photo_template_file = st.file_uploader(
+                "🎨 템플릿 PPTX 파일 업로드",
+                type=["pptx"],
+                help="사진 슬라이드를 뒤에 추가해 붙여넣을 대상 마스터 파워포인트 문서입니다.",
+                key="photo_template_uploader"
+            )
+
+    with col_ph_right:
+        st.markdown("### 3. 슬라이드 빌드 실행")
+        build_btn = st.button("사진 슬라이드 PPTX 생성하기 🚀", use_container_width=True, key="photo_build_btn")
+
+        photo_log_area = st.empty()
+        photo_dl_area = st.empty()
+
+        if build_btn:
+            if not photo_files:
+                st.error("❌ 업로드된 사진 파일이나 ZIP 파일이 없습니다.")
+            else:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    photo_logs = []
+                    def photo_log(msg):
+                        photo_logs.append(msg)
+                        photo_log_area.code("\n".join(photo_logs[-10:]))
+
+                    # 단일 ZIP 파일 처리
+                    if len(photo_files) == 1 and photo_files[0].name.lower().endswith(".zip"):
+                        target_input_path = os.path.join(tmpdir, photo_files[0].name)
+                        with open(target_input_path, "wb") as f:
+                            f.write(photo_files[0].getbuffer())
+                    else:
+                        # 개별 사진 다중 선택 처리
+                        target_input_path = os.path.join(tmpdir, "images")
+                        os.makedirs(target_input_path, exist_ok=True)
+                        for uploaded_f in photo_files:
+                            with open(os.path.join(target_input_path, uploaded_f.name), "wb") as f:
+                                f.write(uploaded_f.getbuffer())
+
+                    # 템플릿 처리
+                    tpl_path = None
+                    if use_photo_template and photo_template_file:
+                        tpl_path = os.path.join(tmpdir, "photo_template.pptx")
+                        with open(tpl_path, "wb") as f:
+                            f.write(photo_template_file.getbuffer())
+
+                    output_ppt_path = os.path.join(tmpdir, "PhotoSlides_output.pptx")
+
+                    try:
+                        with st.spinner("사진 자동 배치 및 슬라이드 빌드 중..."):
+                            generate_photo_slides(
+                                src_path=target_input_path,
+                                template_path=tpl_path,
+                                output_path=output_ppt_path,
+                                max_per_slide=max_photos,
+                                log=photo_log
+                            )
+
+                        if os.path.exists(output_ppt_path):
+                            with open(output_ppt_path, "rb") as f:
+                                result_bytes = f.read()
+
+                            st.success("🎉 사진 슬라이드 PPTX 생성이 완료되었습니다!")
+                            photo_dl_area.download_button(
+                                label="📥 사진 슬라이드 다운로드 (.pptx)",
+                                data=result_bytes,
+                                file_name="교육사진_스케치_슬라이드.pptx",
+                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                use_container_width=True
+                            )
+                        else:
+                            st.error("❌ 사진 슬라이드 파일 생성에 실패했습니다.")
+                    except Exception as ex:
+                        st.error(f"❌ 빌드 도중 에러 발생: {str(ex)}")
+
+    st.stop()
+
 st.markdown("<div class='main-title'>교육만족도 결과보고서생성기</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='subtitle'>설문 로우데이터와 설정 값만 입력하면 시각화 결과 보고서 PPT가 즉시 만들어집니다.</div>",
