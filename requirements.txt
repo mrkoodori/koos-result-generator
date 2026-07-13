@@ -1,4 +1,4 @@
+streamlit>=1.30.0
 python-pptx>=0.6.21
 openpyxl>=3.1
-tkinterdnd2>=0.4.0
-pyinstaller>=6.0
+pillow>=10.0.0

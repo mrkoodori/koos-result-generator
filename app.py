@@ -565,7 +565,7 @@ with st.sidebar:
 if menu == "📸 사진 슬라이드 생성 (PhotoSlideMaker)":
     st.markdown("<div class='main-title'>📸 교육 사진 슬라이드 자동 생성기 (PhotoSlideMaker)</div>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='subtitle'>교육 현장 사진들을 업로드하면, 장수에 알맞은 최적의 격자 그리드로 배치된 스케치 슬라이드 PPTX가 즉시 빌드됩니다.</div>",
+        "<div class='subtitle'>교육 현장 사진들을 업로드하면, 폴더명을 슬라이드 소제목으로 자동 매핑하고 슬라이드당 6장씩 표준 양식에 꽉 차게 배치됩니다.</div>",
         unsafe_allow_html=True
     )
 
@@ -573,13 +573,69 @@ if menu == "📸 사진 슬라이드 생성 (PhotoSlideMaker)":
 
     with col_ph_left:
         st.markdown("### 1. 사진 리소스 업로드")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #EAF1FF, #F0F5FF); border: 2px dashed #2D6CDF; border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+            <div style="font-size: 0.95rem; color: #2D6CDF; font-weight: 700; margin-bottom: 6px;">💡 폴더 기반 자동 매핑 안내</div>
+            <div style="font-size: 0.82rem; color: #4A5568; line-height: 1.5;">
+                <strong>ZIP 파일</strong>로 폴더째 압축해 업로드하면 <strong>폴더명 = 슬라이드 소제목</strong>으로 자동 매핑됩니다.<br/>
+                예: <code>현장스케치/교육장전경/</code>, <code>현장스케치/조별활동/</code> → 소제목 "교육장전경", "조별활동"<br/>
+                폴더 없이 개별 이미지만 올리면 "교육 활동 사진"으로 통합 배치됩니다.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
         photo_files = st.file_uploader(
             "📁 사진 파일들(다중 선택 가능) 또는 ZIP 압축 파일 업로드 (필수)",
-            type=["zip", "jpg", "jpeg", "png", "webp", "bmp"],
+            type=["zip", "jpg", "jpeg", "png", "webp", "bmp", "gif", "tif", "tiff"],
             accept_multiple_files=True,
-            help="여러 장의 이미지 파일을 다중 선택하여 올리거나, 사진 폴더를 ZIP으로 압축해 올릴 수 있습니다.",
+            help="폴더 구조가 있는 ZIP 파일을 올리면 폴더명이 슬라이드 소제목으로 자동 매핑됩니다. 개별 이미지 다중 선택도 가능합니다.",
             key="photo_files_uploader"
         )
+
+        # ZIP 업로드 시 폴더 구조 미리보기
+        if photo_files:
+            is_zip = len(photo_files) == 1 and photo_files[0].name.lower().endswith(".zip")
+            if is_zip:
+                import zipfile as zf
+                try:
+                    zip_bytes = photo_files[0].getbuffer()
+                    import io as _io
+                    with zf.ZipFile(_io.BytesIO(zip_bytes), 'r') as z:
+                        img_exts = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff')
+                        folders = {}
+                        for name in z.namelist():
+                            if name.lower().endswith(img_exts) and not os.path.basename(name).startswith('._'):
+                                parts = name.replace('\\', '/').split('/')
+                                # 폴더 구조 감지
+                                if len(parts) >= 3:
+                                    folder = parts[-2]
+                                elif len(parts) == 2:
+                                    folder = parts[0]
+                                else:
+                                    folder = "(루트)"
+                                folders.setdefault(folder, 0)
+                                folders[folder] += 1
+
+                    if folders:
+                        st.markdown("##### 📂 감지된 폴더 구조 (슬라이드 소제목 매핑)")
+                        preview_html = ""
+                        for fname, count in sorted(folders.items()):
+                            slides_needed = (count + 5) // 6
+                            preview_html += f"""
+                            <div style="display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+                                        background: #ffffff; border: 1px solid #E2E8F0; border-radius: 8px; margin-bottom: 6px;
+                                        border-left: 4px solid #2D6CDF;">
+                                <div style="font-weight: 600; color: #2D3748; flex: 1;">📁 {fname}</div>
+                                <div style="font-size: 0.8rem; color: #718096;">{count}장 → {slides_needed}슬라이드</div>
+                            </div>
+                            """
+                        st.markdown(preview_html, unsafe_allow_html=True)
+                    else:
+                        st.info("ZIP 파일 내에 이미지가 감지되지 않았습니다.")
+                except Exception:
+                    pass
+            else:
+                st.caption(f"📷 {len(photo_files)}개 이미지 파일 선택됨 → 1개 그룹으로 통합 배치됩니다.")
 
         st.markdown("### 2. 슬라이드 설정")
         max_photos = st.slider(
@@ -590,23 +646,62 @@ if menu == "📸 사진 슬라이드 생성 (PhotoSlideMaker)":
             help="한 페이지에 최대 몇 장의 사진을 격자 배치할지 선택합니다. 6장을 초과하면 다음 슬라이드에 자동 분할 배치됩니다."
         )
 
-        use_photo_template = st.checkbox(
-            "🎨 기존 PPT 템플릿(PhotoSlides.pptx) 뒤에 이어 붙이기",
-            value=False,
-            help="체크할 경우 업로드하신 PPT 파일 맨 뒤에 사진 슬라이드를 덧붙여서 새로 생성합니다."
+        use_standard_template = st.checkbox(
+            "🎨 표준 결과보고서 양식(템플릿_결보표양.pptx) 기반으로 생성",
+            value=True,
+            help="체크 시 표준 양식 PPT 템플릿의 '사진 슬라이드' 위치에 맞추어 동일한 스타일의 사진 슬라이드를 생성합니다."
         )
 
+        use_custom_photo_template = False
         photo_template_file = None
-        if use_photo_template:
-            photo_template_file = st.file_uploader(
-                "🎨 템플릿 PPTX 파일 업로드",
-                type=["pptx"],
-                help="사진 슬라이드를 뒤에 추가해 붙여넣을 대상 마스터 파워포인트 문서입니다.",
-                key="photo_template_uploader"
+        if not use_standard_template:
+            use_custom_photo_template = st.checkbox(
+                "📂 사용자 정의 PPT 템플릿 업로드",
+                value=False,
+                help="체크 시 직접 업로드한 PPT 파일 뒤에 사진 슬라이드를 덧붙여 생성합니다."
             )
+            if use_custom_photo_template:
+                photo_template_file = st.file_uploader(
+                    "🎨 템플릿 PPTX 파일 업로드",
+                    type=["pptx"],
+                    help="사진 슬라이드를 뒤에 추가해 붙여넣을 대상 마스터 파워포인트 문서입니다.",
+                    key="photo_template_uploader"
+                )
 
     with col_ph_right:
         st.markdown("### 3. 슬라이드 빌드 실행")
+
+        # 미리보기: 표준 양식 사진 슬라이드 가이드
+        st.markdown("""
+        <div class="ppt-preview-container">
+            <div class="ppt-editor-frame">
+                <div class="ppt-editor-header-bar">
+                    <div class="ppt-editor-dots">
+                        <span class="ppt-dot red"></span>
+                        <span class="ppt-dot yellow"></span>
+                        <span class="ppt-dot green"></span>
+                    </div>
+                    <div style="font-size: 0.7rem; color: #718096; font-family: monospace;">사진 슬라이드 배치 미리보기</div>
+                    <div></div>
+                </div>
+                <div class="ppt-preview-slide" style="min-height: 200px; padding: 12px;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #2D6CDF; border-bottom: 2px solid #2D6CDF; padding-bottom: 4px; margin-bottom: 8px;">
+                        3. 현장 사진 — <span style="color: #E53E3E;">폴더명이 소제목으로 매핑됩니다</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); gap: 4px; flex: 1;">
+                        <div style="background: #EDF2F7; border: 1px dashed #CBD5E0; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #A0AEC0; min-height: 55px;">사진 1</div>
+                        <div style="background: #EDF2F7; border: 1px dashed #CBD5E0; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #A0AEC0; min-height: 55px;">사진 2</div>
+                        <div style="background: #EDF2F7; border: 1px dashed #CBD5E0; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #A0AEC0; min-height: 55px;">사진 3</div>
+                        <div style="background: #EDF2F7; border: 1px dashed #CBD5E0; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #A0AEC0; min-height: 55px;">사진 4</div>
+                        <div style="background: #EDF2F7; border: 1px dashed #CBD5E0; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #A0AEC0; min-height: 55px;">사진 5</div>
+                        <div style="background: #EDF2F7; border: 1px dashed #CBD5E0; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #A0AEC0; min-height: 55px;">사진 6</div>
+                    </div>
+                    <div style="font-size: 0.6rem; color: #A0AEC0; text-align: center; margin-top: 4px;">3×2 격자 (슬라이드당 최대 6장, 비율 보존 자동 크기 조정)</div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
         build_btn = st.button("사진 슬라이드 PPTX 생성하기 🚀", use_container_width=True, key="photo_build_btn")
 
         photo_log_area = st.empty()
@@ -620,7 +715,7 @@ if menu == "📸 사진 슬라이드 생성 (PhotoSlideMaker)":
                     photo_logs = []
                     def photo_log(msg):
                         photo_logs.append(msg)
-                        photo_log_area.code("\n".join(photo_logs[-10:]))
+                        photo_log_area.code("\n".join(photo_logs[-12:]))
 
                     # 단일 ZIP 파일 처리
                     if len(photo_files) == 1 and photo_files[0].name.lower().endswith(".zip"):
@@ -635,9 +730,11 @@ if menu == "📸 사진 슬라이드 생성 (PhotoSlideMaker)":
                             with open(os.path.join(target_input_path, uploaded_f.name), "wb") as f:
                                 f.write(uploaded_f.getbuffer())
 
-                    # 템플릿 처리
+                    # 템플릿 경로 결정
                     tpl_path = None
-                    if use_photo_template and photo_template_file:
+                    if use_standard_template:
+                        tpl_path = default_template_path
+                    elif use_custom_photo_template and photo_template_file:
                         tpl_path = os.path.join(tmpdir, "photo_template.pptx")
                         with open(tpl_path, "wb") as f:
                             f.write(photo_template_file.getbuffer())
@@ -645,7 +742,7 @@ if menu == "📸 사진 슬라이드 생성 (PhotoSlideMaker)":
                     output_ppt_path = os.path.join(tmpdir, "PhotoSlides_output.pptx")
 
                     try:
-                        with st.spinner("사진 자동 배치 및 슬라이드 빌드 중..."):
+                        with st.spinner("🔄 폴더 구조 분석 및 사진 자동 배치 중..."):
                             generate_photo_slides(
                                 src_path=target_input_path,
                                 template_path=tpl_path,
@@ -662,7 +759,7 @@ if menu == "📸 사진 슬라이드 생성 (PhotoSlideMaker)":
                             photo_dl_area.download_button(
                                 label="📥 사진 슬라이드 다운로드 (.pptx)",
                                 data=result_bytes,
-                                file_name="교육사진_스케치_슬라이드.pptx",
+                                file_name="교육사진_슬라이드.pptx",
                                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                 use_container_width=True
                             )
@@ -670,6 +767,9 @@ if menu == "📸 사진 슬라이드 생성 (PhotoSlideMaker)":
                             st.error("❌ 사진 슬라이드 파일 생성에 실패했습니다.")
                     except Exception as ex:
                         st.error(f"❌ 빌드 도중 에러 발생: {str(ex)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+
 
     st.stop()
 
