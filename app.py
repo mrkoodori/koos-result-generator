@@ -303,8 +303,8 @@ st.markdown(
     }
     .box-tag {
         position: absolute;
-        top: -8px;
-        left: 8px;
+        bottom: calc(100% + 2px);
+        left: 4px;
         background-color: #2D6CDF;
         color: white;
         font-size: 0.6rem;
@@ -312,16 +312,17 @@ st.markdown(
         padding: 1px 6px;
         border-radius: 3px;
         line-height: 1.2;
+        white-space: nowrap;
     }
     .box-content {
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         color: #333333;
         font-weight: 500;
         min-height: 14px;
         word-break: break-all;
     }
     .box-content-title1 {
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         font-weight: 400;
         color: #555555;
         margin-bottom: 2px;
@@ -329,7 +330,7 @@ st.markdown(
         word-break: break-all;
     }
     .box-content-title2 {
-        font-size: 1.25rem;
+        font-size: 1.1rem;
         font-weight: 700;
         color: #111111;
         min-height: 24px;
@@ -401,7 +402,7 @@ st.markdown(
         box-sizing: border-box;
         transition: all 0.2s ease;
         z-index: 5;
-        overflow: hidden;
+        overflow: visible;
     }
     .ppt-abs-box:hover {
         background-color: rgba(229, 62, 62, 0.12);
@@ -413,7 +414,7 @@ st.markdown(
     .pin-cover-label {
         top: 6%;
         left: 7%;
-        width: 25%;
+        width: 35%;
         height: 12%;
     }
     .pin-cover-title {
