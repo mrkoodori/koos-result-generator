@@ -19,6 +19,107 @@ def get_base64_image(file_path):
         return base64.b64encode(data).decode()
     return None
 
+def filter_raw_data_by_instructor(input_path, output_path, instructor_name):
+    """
+    설문 로우데이터 파일에서 강사명에 매핑되는 행만 걸러내어 output_path에 저장.
+    강사 관련 열을 찾지 못하거나 매칭되는 행이 없으면 원본 파일을 그대로 리턴.
+    """
+    import os
+    import re
+    import openpyxl
+    import csv
+    
+    if not instructor_name or not os.path.exists(input_path):
+        return input_path
+        
+    ext = os.path.splitext(input_path)[1].lower()
+    
+    # 강사명 정규화 (순수 이름 매칭용)
+    clean_target = re.sub(r'\s+', '', instructor_name)
+    pure_target = re.sub(r'(교수|강사|선생님|강사님|교수님)', '', clean_target)
+    if not pure_target:
+        return input_path
+
+    headers = []
+    rows = []
+    
+    try:
+        if ext == ".csv":
+            data = None
+            for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
+                try:
+                    with open(input_path, "r", encoding=enc, newline="") as f:
+                        data = list(csv.reader(f))
+                    break
+                except Exception:
+                    continue
+            if data is None:
+                with open(input_path, "r", encoding="utf-8", errors="replace", newline="") as f:
+                    data = list(csv.reader(f))
+            data = [r for r in data if any((c or "").strip() for c in r)]
+            if not data:
+                return input_path
+            headers = data[0]
+            rows = data[1:]
+        else:
+            wb = openpyxl.load_workbook(input_path, data_only=True)
+            ws = wb[wb.sheetnames[0]]
+            headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+            for r in range(2, ws.max_row + 1):
+                row = [ws.cell(row=r, column=c).value for c in range(1, ws.max_column + 1)]
+                if all(v is None or str(v).strip() == "" for v in row):
+                    continue
+                rows.append(row)
+            wb.close()
+    except Exception:
+        return input_path
+
+    # 강사 관련 열 자동 감지
+    instructor_cols = []
+    for idx, h in enumerate(headers):
+        if h:
+            h_str = str(h).strip()
+            if any(k in h_str for k in ["강사", "교수", "선생님", "강의"]):
+                if not any(k in h_str.lower() for k in ["타임", "timestamp", "time"]):
+                    instructor_cols.append(idx)
+                    
+    if not instructor_cols:
+        return input_path
+
+    filtered_rows = []
+    for r in rows:
+        match = False
+        for col_idx in instructor_cols:
+            if col_idx < len(r) and r[col_idx] is not None:
+                val_str = re.sub(r'\s+', '', str(r[col_idx]))
+                if pure_target in val_str:
+                    match = True
+                    break
+        if match:
+            filtered_rows.append(r)
+
+    if not filtered_rows:
+        return input_path
+
+    try:
+        if ext == ".csv":
+            with open(output_path, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                writer.writerows(filtered_rows)
+        else:
+            new_wb = openpyxl.Workbook()
+            new_ws = new_wb.active
+            new_ws.title = "Filtered"
+            new_ws.append(headers)
+            for r in filtered_rows:
+                new_ws.append(r)
+            new_wb.save(output_path)
+            new_wb.close()
+        return output_path
+    except Exception:
+        return input_path
+
 # Configure Streamlit page layout and aesthetics
 st.set_page_config(
     page_title="교육만족도 결과보고서생성기",
@@ -583,13 +684,36 @@ col_left, col_right = st.columns([1.1, 0.9])
 with col_left:
     st.markdown("### 1. 입력 파일 업로드")
 
-    raw_file = st.file_uploader(
-        "📊 설문 로우데이터 엑셀 또는 CSV 파일 업로드 (필수)",
-        type=["xlsx", "xls", "xlsm", "csv"],
-        help="구글폼 등에서 내려받은 응답 원본 파일입니다."
-    )
+    config_mode_val = st.session_state.get("config_mode", "직접 입력 (추천 - 엑셀 파일 없이 직접 타이핑)")
+    instructor_count = st.session_state.get("instructor_count", 1)
+    
+    raw_files = {}
+    if "직접 입력" in config_mode_val and instructor_count > 1:
+        st.markdown("##### 📊 강사별 설문 로우데이터 업로드")
+        for i in range(instructor_count):
+            inst_name = st.session_state.get(f"instructor_{i}", "설상훈 교수" if i == 0 else "").strip()
+            if not inst_name:
+                inst_name = f"강사 {i+1}"
+            raw_files[inst_name] = st.file_uploader(
+                f"📂 [{inst_name}] 설문 로우데이터 업로드 (xlsx, csv)",
+                type=["xlsx", "xls", "xlsm", "csv"],
+                key=f"raw_file_{i}"
+            )
+    else:
+        raw_file = st.file_uploader(
+            "📊 설문 로우데이터 엑셀 또는 CSV 파일 업로드 (필수)",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            help="구글폼 등에서 내려받은 응답 원본 파일입니다."
+        )
+        if raw_file:
+            inst_name = st.session_state.get("instructor_0", "설상훈 교수").strip()
+            if not inst_name:
+                inst_name = "강사"
+            raw_files[inst_name] = raw_file
 
-    if raw_file:
+    valid_raw_files = {name: f for name, f in raw_files.items() if f is not None}
+
+    if valid_raw_files:
         st.markdown('<div class="card" style="padding: 15px; background-color: #EAF1FF; border: 1px solid #2D6CDF; margin-top: 10px; margin-bottom: 15px;">', unsafe_allow_html=True)
         col_lbl, col_btn = st.columns([1.2, 0.8])
         with col_lbl:
@@ -602,38 +726,64 @@ with col_left:
             with st.spinner("주관식 의견 분석 중..."):
                 try:
                     with tempfile.TemporaryDirectory() as tmpdir:
-                        raw_ext = os.path.splitext(raw_file.name)[1]
-                        raw_temp_path = os.path.join(tmpdir, f"raw_data{raw_ext}")
-                        with open(raw_temp_path, "wb") as f:
-                            f.write(raw_file.getbuffer())
+                        inst_names = list(valid_raw_files.keys())
+                        tabs = st.tabs([f"🏫 {name}" for name in inst_names])
+                        
+                        for idx, inst_name in enumerate(inst_names):
+                            uploaded_file = valid_raw_files[inst_name]
+                            raw_ext = os.path.splitext(uploaded_file.name)[1]
+                            raw_temp_path = os.path.join(tmpdir, f"raw_data_{idx}{raw_ext}")
+                            with open(raw_temp_path, "wb") as f:
+                                f.write(uploaded_file.getbuffer())
 
-                        from report_generator import parse_raw_data, _is_no_opinion
-                        data = parse_raw_data(raw_temp_path)
-                        subjective = data.get("subjective", [])
-                        n_resp = data.get("n_responses", 0)
+                            # 통합 로우데이터 대응: 강사명 필터링
+                            filtered_temp_path = os.path.join(tmpdir, f"filtered_data_{idx}{raw_ext}")
+                            actual_data_path = filter_raw_data_by_instructor(raw_temp_path, filtered_temp_path, inst_name)
 
-                        if not subjective:
-                            st.warning("⚠️ 파일 내에서 분석할 수 있는 주관식 문항을 찾지 못했습니다.")
-                        else:
-                            st.markdown(f"##### 📊 주관식 '없음/무의견' 통계 분석 결과 (총 응답자: {n_resp}명)")
-                            
-                            cols = st.columns(len(subjective))
-                            for idx, sq in enumerate(subjective):
-                                total_ans = len(sq["answers"])
-                                no_op_count = sum(1 for ans in sq["answers"] if _is_no_opinion(ans))
-                                no_op_rate = round(no_op_count / total_ans * 100) if total_ans else 0
-                                
-                                with cols[idx % len(cols)]:
-                                    st.markdown(f"""
-                                    <div style="background-color: #ffffff; border-radius: 8px; border: 1px solid #eef1f6; box-shadow: 0 4px 6px rgba(0,0,0,0.02); padding: 12px; margin-bottom: 15px; border-top: 4px solid #2D6CDF;">
-                                        <div style="font-weight: 700; font-size: 0.85rem; color: #1A202C; margin-bottom: 8px; min-height: 36px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{sq['header']}</div>
-                                        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: #4A5568;">
-                                            <div>💬 전체 응답: <strong>{total_ans}건</strong></div>
-                                            <div style="color: #E53E3E;">🚫 '없음'류: <strong>{no_op_count}건 ({no_op_rate}%)</strong></div>
-                                            <div style="color: #2D6CDF;">✅ 유효 의견: <strong>{total_ans - no_op_count}건 ({100 - no_op_rate}%)</strong></div>
+                            from report_generator import parse_raw_data, _is_no_opinion
+                            data = parse_raw_data(actual_data_path)
+                            subjective = data.get("subjective", [])
+                            n_resp = data.get("n_responses", 0)
+
+                            with tabs[idx]:
+                                if not subjective:
+                                    st.warning(f"⚠️ {inst_name} 파일 내에서 분석할 수 있는 주관식 문항을 찾지 못했습니다.")
+                                else:
+                                    st.markdown(f"##### 📊 {inst_name} 주관식 통계 분석 결과 (총 응답자: {n_resp}명)")
+                                    
+                                    for sq in subjective:
+                                        total_ans = len(sq["answers"])
+                                        no_op_count = sum(1 for ans in sq["answers"] if _is_no_opinion(ans))
+                                        no_op_rate = round(no_op_count / total_ans * 100) if total_ans else 0
+                                        
+                                        # "없" 단어 포함 의견 분석
+                                        no_word_answers = [ans for ans in sq["answers"] if "없" in ans]
+                                        no_word_count = len(no_word_answers)
+                                        no_word_rate = round(no_word_count / total_ans * 100) if total_ans else 0
+                                        
+                                        st.markdown(f"""
+                                        <div style="background-color: #ffffff; border-radius: 8px; border: 1px solid #eef1f6; box-shadow: 0 4px 6px rgba(0,0,0,0.02); padding: 16px; margin-bottom: 20px; border-top: 4px solid #2D6CDF;">
+                                            <div style="font-weight: 700; font-size: 1rem; color: #1A202C; margin-bottom: 12px; line-height: 1.4;">{sq['header']}</div>
+                                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                                                <div style="font-size: 0.85rem; color: #4A5568; display: flex; flex-direction: column; gap: 8px;">
+                                                    <div>💬 전체 응답: <strong>{total_ans}건</strong></div>
+                                                    <div style="color: #E53E3E;">🚫 '없음'류(무의견): <strong>{no_op_count}건 ({no_op_rate}%)</strong></div>
+                                                    <div style="color: #2D6CDF;">✅ 유효 의견: <strong>{total_ans - no_op_count}건 ({100 - no_op_rate}%)</strong></div>
+                                                    <hr style="margin: 8px 0; border: none; border-top: 1px solid #eef1f6;" />
+                                                    <div style="color: #DD6B20; font-weight: 600;">🔍 "없" 글자 포함 의견: {no_word_count}건 ({no_word_rate}%)</div>
+                                                    <div style="background-color: #EDF2F7; border-radius: 4px; width: 100%; height: 8px; overflow: hidden; margin-top: 4px;">
+                                                        <div style="background-color: #DD6B20; width: {no_word_rate}%; height: 100%;"></div>
+                                                    </div>
+                                                </div>
+                                                <div style="border-left: 1px solid #E2E8F0; padding-left: 20px;">
+                                                    <div style="font-size: 0.85rem; font-weight: 600; color: #2D3748; margin-bottom: 6px;">📋 "없" 포함 의견 모아보기</div>
+                                                    <div style="overflow-y: auto; max-height: 140px; background-color: #F7FAFC; border: 1px solid #EDF2F7; border-radius: 6px; padding: 10px; font-size: 0.8rem; line-height: 1.4;">
+                                                        {"".join([f'<div style="margin-bottom: 6px; color: #4A5568; border-bottom: 1px dashed #EDF2F7; padding-bottom: 4px;">• {ans}</div>' for ans in no_word_answers]) if no_word_answers else '<div style="color: #A0AEC0; text-align: center; padding-top: 10px;">"없" 단어가 포함된 의견이 없습니다.</div>'}
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                        """, unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"❌ 분석 중 오류 발생: {str(e)}")
 
@@ -643,7 +793,8 @@ with col_left:
     config_mode = st.radio(
         "설정 값 입력 방식 선택",
         options=["직접 입력 (추천 - 엑셀 파일 없이 직접 타이핑)", "엑셀 파일 업로드 (설정.xlsx 사용)"],
-        horizontal=True
+        horizontal=True,
+        key="config_mode"
     )
 
     config_dict = None
@@ -891,114 +1042,156 @@ with col_right:
     download_area = st.empty()
 
     if generate_btn:
-        if not raw_file:
-            st.error("❌ 설문 로우데이터 파일을 업로드해 주세요.")
-        elif "엑셀 파일 업로드" in config_mode and not config_file:
+        missing_files = []
+        if "직접 입력" in config_mode_val:
+            for i in range(instructor_count):
+                inst_name = st.session_state.get(f"instructor_{i}", "설상훈 교수" if i == 0 else "").strip()
+                if not inst_name:
+                    inst_name = f"강사 {i+1}"
+                if raw_files.get(inst_name) is None:
+                    missing_files.append(inst_name)
+        else:
+            if not valid_raw_files:
+                missing_files.append("설문 로우데이터")
+
+        if missing_files:
+            st.error(f"❌ 다음 항목의 로우데이터 파일을 업로드해 주세요: {', '.join(missing_files)}")
+        elif "엑셀 파일 업로드" in config_mode_val and not config_file:
             st.error("❌ 설정 엑셀 파일(설정.xlsx)을 업로드해 주세요.")
         elif use_custom_template and not template_file:
             st.error("❌ 템플릿 PPTX 파일을 업로드해 주세요.")
         else:
             with tempfile.TemporaryDirectory() as tmpdir:
-                raw_ext = os.path.splitext(raw_file.name)[1]
-                raw_temp_path = os.path.join(tmpdir, f"raw_data{raw_ext}")
-
-                with open(raw_temp_path, "wb") as f:
-                    f.write(raw_file.getbuffer())
-
-                config_arg = None
-                config_temp_path = None
-
-                if config_file:
-                    config_ext = os.path.splitext(config_file.name)[1]
-                    config_temp_path = os.path.join(tmpdir, f"config{config_ext}")
-
-                    with open(config_temp_path, "wb") as f:
-                        f.write(config_file.getbuffer())
-
-                    config_arg = config_temp_path
-                else:
-                    config_arg = config_dict
-
                 template_temp_path = default_template_path
-
                 if template_file:
                     template_temp_path = os.path.join(tmpdir, "template.pptx")
-
                     with open(template_temp_path, "wb") as f:
                         f.write(template_file.getbuffer())
 
                 if not template_temp_path or not os.path.exists(template_temp_path):
                     st.error("❌ 기본 템플릿 파일을 찾을 수 없습니다. 템플릿 파일을 직접 업로드해 주세요.")
                 else:
-                    output_temp_path = os.path.join(tmpdir, "output.pptx")
-
                     logs = []
 
                     def streamlit_log(message):
                         logs.append(message)
                         log_area.code("\n".join(logs[-10:]))
 
-                    try:
-                        with st.spinner("결과보고서 생성 중..."):
-                            streamlit_log("[시작] 교육보고서 생성을 시작합니다...")
+                    pptx_results = {}
 
+                    try:
+                        streamlit_log("[시작] 교육보고서 생성을 시작합니다...")
+
+                        # 직접 입력 모드에서 강사별 개별 보고서 순차 빌드
+                        if "직접 입력" in config_mode_val:
+                            import copy
+                            for i in range(instructor_count):
+                                inst_name = st.session_state.get(f"instructor_{i}", "설상훈 교수" if i == 0 else "").strip()
+                                if not inst_name:
+                                    inst_name = f"강사 {i+1}"
+
+                                uploaded_raw = raw_files[inst_name]
+                                raw_ext = os.path.splitext(uploaded_raw.name)[1]
+                                raw_temp_path = os.path.join(tmpdir, f"raw_{i}{raw_ext}")
+
+                                with open(raw_temp_path, "wb") as f:
+                                    f.write(uploaded_raw.getbuffer())
+
+                                # 통합 로우데이터 대응: 강사명 필터링
+                                filtered_temp_path = os.path.join(tmpdir, f"filtered_{i}{raw_ext}")
+                                actual_raw_path = filter_raw_data_by_instructor(raw_temp_path, filtered_temp_path, inst_name)
+
+                                inst_config = copy.deepcopy(config_dict)
+                                inst_config["basic"]["강사명"] = inst_name
+
+                                output_temp_path = os.path.join(tmpdir, f"output_{i}.pptx")
+
+                                streamlit_log(f"[{inst_name}] 결과보고서 생성 중...")
+                                generate_report(
+                                    raw_path=actual_raw_path,
+                                    config=inst_config,
+                                    template_path=template_temp_path,
+                                    output_path=output_temp_path,
+                                    drop_no_opinion=not keep_no_opinion,
+                                    log=streamlit_log
+                                )
+
+                                if os.path.exists(output_temp_path):
+                                    with open(output_temp_path, "rb") as f:
+                                        pptx_results[inst_name] = f.read()
+
+                        # 엑셀 파일 업로드 모드
+                        else:
+                            uploaded_raw = list(valid_raw_files.values())[0]
+                            raw_ext = os.path.splitext(uploaded_raw.name)[1]
+                            raw_temp_path = os.path.join(tmpdir, f"raw_data{raw_ext}")
+
+                            with open(raw_temp_path, "wb") as f:
+                                f.write(uploaded_raw.getbuffer())
+
+                            config_temp_path = os.path.join(tmpdir, f"config{os.path.splitext(config_file.name)[1]}")
+                            with open(config_temp_path, "wb") as f:
+                                f.write(config_file.getbuffer())
+
+                            # 엑셀 모드에서도 강사명을 추출하여 통합 데이터 필터링 수행
+                            inst_name = "강사"
+                            try:
+                                import openpyxl
+                                wb = openpyxl.load_workbook(config_temp_path, data_only=True)
+                                if "기본정보" in wb.sheetnames:
+                                    ws = wb["기본정보"]
+                                    for r in range(1, ws.max_row + 1):
+                                        if ws.cell(row=r, column=1).value == "강사명":
+                                            inst_name = str(ws.cell(row=r, column=2).value or "강사").strip()
+                                            break
+                                wb.close()
+                            except Exception:
+                                pass
+
+                            filtered_temp_path = os.path.join(tmpdir, f"filtered_data{raw_ext}")
+                            actual_raw_path = filter_raw_data_by_instructor(raw_temp_path, filtered_temp_path, inst_name)
+
+                            output_temp_path = os.path.join(tmpdir, "output.pptx")
+
+                            streamlit_log("[엑셀 설정] 결과보고서 생성 중...")
                             generate_report(
-                                raw_path=raw_temp_path,
-                                config=config_arg,
+                                raw_path=actual_raw_path,
+                                config=config_temp_path,
                                 template_path=template_temp_path,
                                 output_path=output_temp_path,
                                 drop_no_opinion=not keep_no_opinion,
                                 log=streamlit_log
                             )
 
-                        if os.path.exists(output_temp_path):
-                            with open(output_temp_path, "rb") as f:
-                                result_pptx_bytes = f.read()
+                            if os.path.exists(output_temp_path):
+                                with open(output_temp_path, "rb") as f:
+                                    pptx_results[inst_name] = f.read()
 
-                            dl_filename = "교육결과보고서.pptx"
-
-                            if config_dict:
-                                title = (
-                                    config_dict["basic"].get("표지_제목2")
-                                    or config_dict["basic"].get("표지_제목1")
-                                )
-
-                                if title:
-                                    dl_filename = f"{title.replace(' ', '_')}_결과보고서.pptx"
-
-                            elif config_file and config_temp_path:
-                                try:
-                                    import openpyxl
-
-                                    wb = openpyxl.load_workbook(config_temp_path, data_only=True)
-
-                                    if "기본정보" in wb.sheetnames:
-                                        ws = wb["기본정보"]
-                                        title = ""
-
-                                        for r in range(1, ws.max_row + 1):
-                                            k = ws.cell(row=r, column=1).value
-                                            v = ws.cell(row=r, column=2).value
-
-                                            if k and str(k).strip() in ("표지_제목2", "표지_제목1") and v:
-                                                title = str(v).strip()
-                                                break
-
-                                        if title:
-                                            dl_filename = f"{title.replace(' ', '_')}_결과보고서.pptx"
-
-                                except Exception:
-                                    pass
-
+                        if pptx_results:
                             st.success("🎉 결과보고서 생성이 완료되었습니다!")
 
-                            download_area.download_button(
-                                label="📥 결과보고서 다운로드 (.pptx)",
-                                data=result_pptx_bytes,
-                                file_name=dl_filename,
-                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                use_container_width=True
-                            )
+                            # 강사별 다운로드 버튼을 렌더링
+                            title_base = "결과보고서"
+                            if config_dict and (config_dict["basic"].get("표지_제목2") or config_dict["basic"].get("표지_제목1")):
+                                title_base = config_dict["basic"].get("표지_제목2") or config_dict["basic"].get("표지_제목1")
+                            
+                            # 특수문자 제거
+                            title_base = re.sub(r'[\/:*?"<>| ]', '_', title_base)
+
+                            with download_area.container():
+                                st.markdown("#### 📥 생성된 결과보고서 다운로드")
+                                cols = st.columns(len(pptx_results))
+                                for idx, (name, pptx_bytes) in enumerate(pptx_results.items()):
+                                    with cols[idx % len(cols)]:
+                                        dl_filename = f"{title_base}_{name}_결과보고서.pptx"
+                                        st.download_button(
+                                            label=f"📥 [{name}] 다운로드 (.pptx)",
+                                            data=pptx_bytes,
+                                            file_name=dl_filename,
+                                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                            use_container_width=True,
+                                            key=f"dl_btn_{idx}"
+                                        )
                         else:
                             st.error("❌ 결과 파일 생성에 실패했습니다. 로그를 확인하세요.")
 
